@@ -20,8 +20,8 @@ export default function Home() {
 
   const yogaPoses = [
     { id: 1, name: "Yoga Pose 1", completed: true },
-    { id: 2, name: "Yoga Pose 2", completed: false, active: true },
-    { id: 3, name: "Yoga Pose 3", completed: true },
+    { id: 2, name: "Yoga Pose 2", completed: false, active: selectedPose === 2 },
+    { id: 3, name: "Yoga Pose 3", completed: false, active: selectedPose === 3 },
     { id: 4, name: "Yoga Pose 4", completed: true },
     { id: 5, name: "Yoga Pose 5", completed: false },
     { id: 6, name: "Yoga Pose 6", completed: true },
@@ -30,8 +30,8 @@ export default function Home() {
 
   const suryaNamaskarPoses = [
     { id: 1, name: "Surya Namaskar Pose 1" },
-    { id: 2, name: "Surya Namaskar Pose 2" },
-    { id: 3, name: "Surya Namaskar Pose 3" },
+    { id: 2, name: "Surya Namaskar Pose 2 (Upward Dog)" },
+    { id: 3, name: "Surya Namaskar Pose 3 (Hands Joined)" },
     { id: 4, name: "Surya Namaskar Pose 4" },
   ];
 
@@ -92,6 +92,7 @@ export default function Home() {
         <PoseViewer 
           currentTime={currentTime} 
           onPoseDetected={handlePoseDetected}
+          poseId={selectedPose === 3 ? 3 : 2}
         />
         
         <Instructions 

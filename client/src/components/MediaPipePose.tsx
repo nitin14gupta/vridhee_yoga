@@ -6,13 +6,18 @@ import { LM, UPWARD_DOG_REFERENCE, JOINT_WEIGHTS, JOINT_TOLERANCE_DEG, type Refe
 interface MediaPipePoseProps {
   onPoseDetected: (landmarks: any, matchPercentage: number) => void;
   onVideoReady: (video: HTMLVideoElement) => void;
+  referenceAngles?: ReferenceAngles;
+  onAnglesComputed?: (angles: ReferenceAngles) => void; // expose angles to parent
 }
 
-export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPipePoseProps) {
+export default function MediaPipePose({ onPoseDetected, onVideoReady, referenceAngles, onAnglesComputed }: MediaPipePoseProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const prevAnglesRef = useRef<ReferenceAngles | null>(null);
+  const smoothingAlpha = 0.4; // EMA factor
+  const lastJointDiffsRef = useRef<Partial<Record<keyof ReferenceAngles, number>> | null>(null);
 
   // Initialize MediaPipe Pose
   const initializePose = useCallback(async () => {
@@ -63,6 +68,31 @@ export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPip
 
             // Calculate match percentage against reference
             const matchPercentage = calculateMatchPercentage(results.poseLandmarks);
+
+            // Overlay traffic-light dots for key joints based on last diffs
+            const diffs = lastJointDiffsRef.current;
+            if (diffs) {
+              const mark = (idx: number, diff: number | undefined) => {
+                if (!results.poseLandmarks[idx] || diff === undefined) return;
+                const lm = results.poseLandmarks[idx];
+                const x = lm.x * canvasRef.current!.width;
+                const y = lm.y * canvasRef.current!.height;
+                const ok = diff <= JOINT_TOLERANCE_DEG * 0.5;
+                const warn = diff <= JOINT_TOLERANCE_DEG;
+                canvasCtx.beginPath();
+                canvasCtx.arc(x, y, 6, 0, Math.PI * 2);
+                canvasCtx.fillStyle = ok ? '#22c55e' : (warn ? '#eab308' : '#ef4444');
+                canvasCtx.fill();
+              };
+              mark(LM.LEFT_SHOULDER, diffs.leftShoulder);
+              mark(LM.RIGHT_SHOULDER, diffs.rightShoulder);
+              mark(LM.LEFT_ELBOW, diffs.leftElbow);
+              mark(LM.RIGHT_ELBOW, diffs.rightElbow);
+              mark(LM.LEFT_HIP, diffs.leftHip);
+              mark(LM.RIGHT_HIP, diffs.rightHip);
+              mark(LM.LEFT_KNEE, diffs.leftKnee);
+              mark(LM.RIGHT_KNEE, diffs.rightKnee);
+            }
             
             // Notify parent component
             onPoseDetected(results.poseLandmarks, matchPercentage);
@@ -120,7 +150,8 @@ export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPip
     };
 
     // Build current angles
-    const current: ReferenceAngles = {
+    // Raw angles
+    const rawAngles: ReferenceAngles = {
       leftElbow: angleAt(landmarks[LM.LEFT_SHOULDER], landmarks[LM.LEFT_ELBOW], landmarks[LM.LEFT_WRIST]),
       rightElbow: angleAt(landmarks[LM.RIGHT_SHOULDER], landmarks[LM.RIGHT_ELBOW], landmarks[LM.RIGHT_WRIST]),
       leftShoulder: angleAt(landmarks[LM.LEFT_ELBOW], landmarks[LM.LEFT_SHOULDER], landmarks[LM.LEFT_HIP]),
@@ -135,30 +166,92 @@ export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPip
       )
     };
 
-    const reference = UPWARD_DOG_REFERENCE;
+    // Expose raw angles
+    if (onAnglesComputed) onAnglesComputed(rawAngles);
+
+    // Smooth with EMA
+    const prev = prevAnglesRef.current;
+    const current: ReferenceAngles = prev
+      ? (Object.keys(rawAngles) as Array<keyof ReferenceAngles>).reduce((acc, k) => {
+          acc[k] = prev[k] * (1 - smoothingAlpha) + rawAngles[k] * smoothingAlpha;
+          return acc;
+        }, {} as ReferenceAngles)
+      : rawAngles;
+    prevAnglesRef.current = current;
+
+    const reference = referenceAngles || UPWARD_DOG_REFERENCE;
 
     // Weighted score per joint using linear falloff within tolerance
-    const keys = Object.keys(reference) as Array<keyof ReferenceAngles>;
-    let score = 0;
-    let weightSum = 0;
-    for (const key of keys) {
-      const expected = reference[key];
-      const actual = current[key];
-      const diff = Math.abs(expected - actual);
-      const tolerance = JOINT_TOLERANCE_DEG;
-      const jointWeight = JOINT_WEIGHTS[key] ?? 0.1;
-      weightSum += jointWeight;
-      const jointScore = diff >= tolerance ? 0 : 1 - diff / tolerance; // 1 within perfect, 0 outside
-      score += jointScore * jointWeight;
-    }
+    // Scoring function with option to mirror left/right
+    const computeScore = (useMirrored: boolean) => {
+      const a = { ...current } as ReferenceAngles;
+      if (useMirrored) {
+        const swap = (k1: keyof ReferenceAngles, k2: keyof ReferenceAngles) => {
+          const tmp = a[k1]; a[k1] = a[k2]; a[k2] = tmp;
+        };
+        swap('leftElbow', 'rightElbow');
+        swap('leftShoulder', 'rightShoulder');
+        swap('leftHip', 'rightHip');
+        swap('leftKnee', 'rightKnee');
+      }
 
-    if (weightSum === 0) return 0;
-    const normalized = (score / weightSum) * 100;
+      const keys = Object.keys(reference) as Array<keyof ReferenceAngles>;
+      let score = 0; let weightSum = 0; let passWeight = 0; let nearPerfectWeight = 0;
+      const diffs: Partial<Record<keyof ReferenceAngles, number>> = {};
+      for (const key of keys) {
+        const expected = reference[key];
+        const actual = a[key];
+        const diff = Math.abs(expected - actual);
+        const tolerance = JOINT_TOLERANCE_DEG;
+        const jointWeight = JOINT_WEIGHTS[key] ?? 0.1;
+        weightSum += jointWeight;
+        const jointScore = diff >= tolerance ? 0 : 1 - diff / tolerance;
+        score += jointScore * jointWeight;
+        diffs[key] = diff;
+        if (diff <= tolerance * 0.5) passWeight += jointWeight; // comfortably correct
+        if (diff <= tolerance * 0.25) nearPerfectWeight += jointWeight; // very precise
+      }
+      if (weightSum === 0) return { score: 0, passRatio: 0, nearPerfectRatio: 0 };
+      return {
+        score: (score / weightSum) * 100,
+        passRatio: passWeight / weightSum,
+        nearPerfectRatio: nearPerfectWeight / weightSum,
+        diffs
+      };
+    };
 
+    const resNormal = computeScore(false);
+    const resMirrored = computeScore(true);
+    let normalized = Math.max(resNormal.score, resMirrored.score);
+    const passRatio = normalized === resNormal.score ? resNormal.passRatio : resMirrored.passRatio;
+    const nearPerfectRatio = normalized === resNormal.score ? resNormal.nearPerfectRatio : resMirrored.nearPerfectRatio;
+    lastJointDiffsRef.current = (normalized === resNormal.score ? resNormal.diffs : resMirrored.diffs) || null;
     // Visibility gating: if core joints are mostly invisible, reduce score
-    const core = [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP];
-    const visible = core.filter(i => landmarks[i]?.visibility > 0.5).length;
-    if (visible < 2) return 0;
+    // Visibility gating and penalty to avoid high scores from just face/hands
+    const core = [
+      LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER,
+      LM.LEFT_HIP, LM.RIGHT_HIP,
+      LM.LEFT_ELBOW, LM.RIGHT_ELBOW,
+      LM.LEFT_WRIST, LM.RIGHT_WRIST,
+      LM.LEFT_KNEE, LM.RIGHT_KNEE,
+      LM.LEFT_ANKLE, LM.RIGHT_ANKLE
+    ];
+    const visList = core.map(i => landmarks[i]?.visibility ?? 0);
+    const visibleCount = visList.filter(v => v > 0.5).length;
+    if (visibleCount < 6) return 0; // not enough body joints detected
+
+    // Penalize proportionally when fewer joints are visible
+    const visibilityFactor = Math.min(1, visibleCount / 12);
+    normalized *= visibilityFactor;
+
+    // Reward clear correctness: if most joints are well within tolerance, ensure 90%+
+    if (passRatio >= 0.85) {
+      normalized = Math.max(normalized, 90 + Math.min(5, (passRatio - 0.85) * 100));
+    }
+    // Near-perfect precision pushes towards 97–100
+    if (nearPerfectRatio >= 0.6) {
+      normalized = Math.max(normalized, 96 + Math.min(4, (nearPerfectRatio - 0.6) * 10));
+    }
 
     return Math.max(0, Math.min(100, normalized));
   };

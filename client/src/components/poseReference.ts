@@ -1,7 +1,5 @@
-// Reference pose definitions and weights for scoring
 
 export type ReferenceAngles = {
-  // angles in degrees for key joints
   leftElbow: number;
   rightElbow: number;
   leftShoulder: number;
@@ -10,10 +8,9 @@ export type ReferenceAngles = {
   rightHip: number;
   leftKnee: number;
   rightKnee: number;
-  torsoTilt: number; // angle of line connecting mid-shoulders to mid-hips vs horizontal
+  torsoTilt: number;
 };
 
-// MediaPipe Pose landmark indices
 export const LM = {
   NOSE: 0,
   LEFT_EYE_INNER: 1,
@@ -51,27 +48,35 @@ export const LM = {
 } as const;
 
 export const UPWARD_DOG_REFERENCE: ReferenceAngles = {
-  leftElbow: 175,
-  rightElbow: 175,
-  leftShoulder: 70,
-  rightShoulder: 70,
+  leftElbow: 180,
+  rightElbow: 180,
+  leftShoulder: 55,
+  rightShoulder: 55,
   leftHip: 180,
   rightHip: 180,
   leftKnee: 180,
   rightKnee: 180,
-  torsoTilt: 15
+  torsoTilt: 80
 };
 
-// Weights grouped by focus areas as requested: chest, hands, legs
+export const HANDS_JOINED_REFERENCE: ReferenceAngles = {
+  leftElbow: 180,
+  rightElbow: 180,
+  leftShoulder: 175,
+  rightShoulder: 175,
+  leftHip: 90, 
+  rightHip: 90,
+  leftKnee: 60,
+  rightKnee: 60,
+  torsoTilt: 0
+};
+
 export const JOINT_WEIGHTS: Record<keyof ReferenceAngles, number> = {
-  // chest (shoulders + torso)
   leftShoulder: 0.14,
   rightShoulder: 0.14,
-  torsoTilt: 0.12,
-  // hands (elbows)
+  torsoTilt: 0.06,
   leftElbow: 0.15,
   rightElbow: 0.15,
-  // legs (hips + knees)
   leftHip: 0.10,
   rightHip: 0.10,
   leftKnee: 0.05,
@@ -79,6 +84,4 @@ export const JOINT_WEIGHTS: Record<keyof ReferenceAngles, number> = {
 };
 
 // Per-joint tolerance in degrees for a full score (beyond this, score scales down)
-export const JOINT_TOLERANCE_DEG = 20;
-
-
+export const JOINT_TOLERANCE_DEG = 28;
