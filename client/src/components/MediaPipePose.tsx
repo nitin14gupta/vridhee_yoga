@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { LM, UPWARD_DOG_REFERENCE, JOINT_WEIGHTS, JOINT_TOLERANCE_DEG, type ReferenceAngles } from './poseReference';
 
 interface MediaPipePoseProps {
   onPoseDetected: (landmarks: any, matchPercentage: number) => void;
@@ -60,7 +61,7 @@ export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPip
               radius: 3
             });
 
-            // Calculate match percentage (simplified for now)
+            // Calculate match percentage against reference
             const matchPercentage = calculateMatchPercentage(results.poseLandmarks);
             
             // Notify parent component
@@ -93,35 +94,73 @@ export default function MediaPipePose({ onPoseDetected, onVideoReady }: MediaPip
     }
   }, [onPoseDetected, onVideoReady]);
 
-  // Calculate match percentage based on pose landmarks
+  // Calculate match percentage based on pose landmarks vs reference angles
   const calculateMatchPercentage = (landmarks: any): number => {
     if (!landmarks || landmarks.length === 0) return 0;
 
-    // This is a simplified calculation - in a real app, you'd compare with reference pose
-    // For now, we'll simulate based on pose confidence and landmark positions
-    
-    let totalConfidence = 0;
-    let validLandmarks = 0;
+    // Helper to compute 2D angle at joint B formed by A-B-C
+    const angleAt = (a: any, b: any, c: any): number => {
+      const v1x = a.x - b.x; const v1y = a.y - b.y;
+      const v2x = c.x - b.x; const v2y = c.y - b.y;
+      const dot = v1x * v2x + v1y * v2y;
+      const mag1 = Math.hypot(v1x, v1y);
+      const mag2 = Math.hypot(v2x, v2y);
+      if (mag1 === 0 || mag2 === 0) return 0;
+      const cos = Math.min(1, Math.max(-1, dot / (mag1 * mag2)));
+      return (Math.acos(cos) * 180) / Math.PI;
+    };
 
-    // Calculate average confidence of key landmarks
-    const keyLandmarks = [11, 12, 23, 24, 25, 26]; // shoulders, hips, knees
-    keyLandmarks.forEach(index => {
-      if (landmarks[index] && landmarks[index].visibility > 0.5) {
-        totalConfidence += landmarks[index].visibility;
-        validLandmarks++;
-      }
-    });
+    // Midpoints for torso tilt
+    const midpoint = (p1: any, p2: any) => ({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 });
+    const angleOfLine = (p1: any, p2: any): number => {
+      const dy = p2.y - p1.y;
+      const dx = p2.x - p1.x;
+      const ang = (Math.atan2(dy, dx) * 180) / Math.PI; // -180..180 relative to +x (horizontal)
+      return Math.abs(ang); // compare with small values for near-horizontal
+    };
 
-    if (validLandmarks === 0) return 0;
+    // Build current angles
+    const current: ReferenceAngles = {
+      leftElbow: angleAt(landmarks[LM.LEFT_SHOULDER], landmarks[LM.LEFT_ELBOW], landmarks[LM.LEFT_WRIST]),
+      rightElbow: angleAt(landmarks[LM.RIGHT_SHOULDER], landmarks[LM.RIGHT_ELBOW], landmarks[LM.RIGHT_WRIST]),
+      leftShoulder: angleAt(landmarks[LM.LEFT_ELBOW], landmarks[LM.LEFT_SHOULDER], landmarks[LM.LEFT_HIP]),
+      rightShoulder: angleAt(landmarks[LM.RIGHT_ELBOW], landmarks[LM.RIGHT_SHOULDER], landmarks[LM.RIGHT_HIP]),
+      leftHip: angleAt(landmarks[LM.LEFT_SHOULDER], landmarks[LM.LEFT_HIP], landmarks[LM.LEFT_KNEE]),
+      rightHip: angleAt(landmarks[LM.RIGHT_SHOULDER], landmarks[LM.RIGHT_HIP], landmarks[LM.RIGHT_KNEE]),
+      leftKnee: angleAt(landmarks[LM.LEFT_HIP], landmarks[LM.LEFT_KNEE], landmarks[LM.LEFT_ANKLE]),
+      rightKnee: angleAt(landmarks[LM.RIGHT_HIP], landmarks[LM.RIGHT_KNEE], landmarks[LM.RIGHT_ANKLE]),
+      torsoTilt: angleOfLine(
+        midpoint(landmarks[LM.LEFT_SHOULDER], landmarks[LM.RIGHT_SHOULDER]),
+        midpoint(landmarks[LM.LEFT_HIP], landmarks[LM.RIGHT_HIP])
+      )
+    };
 
-    const avgConfidence = totalConfidence / validLandmarks;
-    
-    // Simulate pose accuracy based on confidence
-    // In reality, you'd compare angles and positions with reference pose
-    const baseAccuracy = avgConfidence * 100;
-    const randomVariation = Math.random() * 10 - 5; // ±5% variation
-    
-    return Math.max(0, Math.min(100, baseAccuracy + randomVariation));
+    const reference = UPWARD_DOG_REFERENCE;
+
+    // Weighted score per joint using linear falloff within tolerance
+    const keys = Object.keys(reference) as Array<keyof ReferenceAngles>;
+    let score = 0;
+    let weightSum = 0;
+    for (const key of keys) {
+      const expected = reference[key];
+      const actual = current[key];
+      const diff = Math.abs(expected - actual);
+      const tolerance = JOINT_TOLERANCE_DEG;
+      const jointWeight = JOINT_WEIGHTS[key] ?? 0.1;
+      weightSum += jointWeight;
+      const jointScore = diff >= tolerance ? 0 : 1 - diff / tolerance; // 1 within perfect, 0 outside
+      score += jointScore * jointWeight;
+    }
+
+    if (weightSum === 0) return 0;
+    const normalized = (score / weightSum) * 100;
+
+    // Visibility gating: if core joints are mostly invisible, reduce score
+    const core = [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_HIP, LM.RIGHT_HIP];
+    const visible = core.filter(i => landmarks[i]?.visibility > 0.5).length;
+    if (visible < 2) return 0;
+
+    return Math.max(0, Math.min(100, normalized));
   };
 
   useEffect(() => {
