@@ -5,7 +5,6 @@ import PoseNavigation from '../components/PoseNavigation';
 import PoseDetails from '../components/PoseDetails';
 import PoseViewer from '../components/PoseViewer';
 import Instructions from '../components/Instructions';
-import SmartTimer from '../components/SmartTimer';
 
 export default function Home() {
   const [selectedPose, setSelectedPose] = useState(2);
@@ -14,16 +13,15 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState("00:00");
   const [matchPercentage, setMatchPercentage] = useState(0);
-  const [totalCorrectTime, setTotalCorrectTime] = useState(0);
   const [sessionStartTime, setSessionStartTime] = useState(0);
   const [poseDetected, setPoseDetected] = useState(false);
 
   const yogaPoses = [
     { id: 1, name: "Yoga Pose 1", completed: true },
     { id: 2, name: "Yoga Pose 2", completed: false, active: selectedPose === 2 },
-    { id: 3, name: "Yoga Pose 3", completed: false, active: selectedPose === 3 },
+    { id: 3, name: "Yoga Pose 3", completed: true },
     { id: 4, name: "Yoga Pose 4", completed: true },
-    { id: 5, name: "Yoga Pose 5", completed: false },
+    { id: 5, name: "Yoga Pose 5", completed: true },
     { id: 6, name: "Yoga Pose 6", completed: true },
     { id: 7, name: "Yoga Pose 7", completed: true },
   ];
@@ -52,22 +50,9 @@ export default function Home() {
     }
   };
 
-  const handleTimeUpdate = (time: string, correctTime: number) => {
-    setCurrentTime(time);
-    setTotalCorrectTime(correctTime);
-  };
-
   const handlePoseDetected = (landmarks: any, matchPercentage: number) => {
     setMatchPercentage(matchPercentage);
     setPoseDetected(true);
-  };
-
-  // Calculate accuracy percentage
-  const calculateAccuracy = () => {
-    if (sessionStartTime === 0) return 0;
-    const totalSessionTime = Math.floor((Date.now() - sessionStartTime) / 1000);
-    if (totalSessionTime === 0) return 0;
-    return Math.round((totalCorrectTime / totalSessionTime) * 100);
   };
 
   return (
@@ -88,7 +73,7 @@ export default function Home() {
         onPlayToggle={handlePlayToggle}
       />
 
-      <div className="flex-1 p-6">
+      <div className="flex-1 bg-gray-50 px-6 py-6 pt-0">
         <PoseViewer 
           currentTime={currentTime} 
           onPoseDetected={handlePoseDetected}
@@ -100,42 +85,8 @@ export default function Home() {
           isVisible={instructionsVisible}
           onToggle={() => setInstructionsVisible(!instructionsVisible)}
         />
-
-        {/* Pose Status Indicator */}
-        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className={`w-4 h-4 rounded-full ${matchPercentage >= 90 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className="text-sm font-medium">
-                {matchPercentage >= 90 ? 'Pose Correct - Timer Running' : 'Pose Incorrect - Timer Paused'}
-              </span>
-            </div>
-            <div className="text-sm text-gray-600">
-              Accuracy: {calculateAccuracy()}%
-            </div>
-          </div>
-          <div className="mt-2">
-            <div className="text-xs text-gray-500 mb-1">Match Percentage: {Math.round(matchPercentage)}%</div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  matchPercentage >= 90 ? 'bg-green-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${Math.min(100, matchPercentage)}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* Hidden Smart Timer Component */}
-      <div className="hidden">
-        <SmartTimer 
-          isActive={isPlaying} 
-          matchPercentage={matchPercentage}
-          onTimeUpdate={handleTimeUpdate}
-        />
-      </div>
     </div>
   );
 }

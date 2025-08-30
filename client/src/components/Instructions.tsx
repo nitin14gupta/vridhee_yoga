@@ -49,7 +49,7 @@ export default function Instructions({ instructions, isVisible, onToggle }: Inst
   return (
     <div className="mt-6 bg-white border border-gray-200 rounded-lg">
       <div className="flex items-center justify-between p-4">
-        <h3 className="text-lg font-semibold text-gray-800">Instructions</h3>
+        <h3 className="text-lg font-semibold text-blue-600">Instructions</h3>
         <div className="flex items-center space-x-2">
           <button 
             className={`p-2 hover:bg-gray-200 rounded-full transition-colors ${isSpeaking ? 'text-blue-600' : isMuted ? 'text-gray-400' : 'text-gray-600'}`}
